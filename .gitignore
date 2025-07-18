@@ -4,3 +4,7 @@
 *.txt
 *.mdx
 *.html
+*.py
+__pycache__
+data
+.DS_Store

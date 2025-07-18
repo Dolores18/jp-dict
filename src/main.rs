@@ -1,10 +1,14 @@
 mod database;
 mod parser;
-
+mod obunsha_dict;  // 新增：旺文社国語辞典模块
+mod data_cleaner;  // 新增：数据清理模块
+mod web_server;  
 use database::{Database, DictionaryEntry};
 use parser::DictParser;
+use obunsha_dict::ObunshaDictDatabase;  // 移除未使用的ObunshaDictEntry
+use data_cleaner::DataCleaner;  // 新增：数据清理器导入
 use std::env;
-
+use web_server::start_server;  // 修正：使用正确的函数名
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("表現読解国語辞典 - 日语词典数据提取工具");
     
@@ -18,10 +22,47 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "test-agaku" => {
             test_agaku_parsing()
         }
+        "init-obunsha" => {  // 新增：初始化旺文社国语辞典表
+            init_obunsha_table()
+        }
+        "clean-data" => {  // 新增：清理导出数据
+            clean_exported_data()
+        }
+        "analyze-data" => {  // 新增：分析数据结构
+            analyze_exported_data()
+        }
+        "import-obunsha" => {  // 新增：导入旺文社数据到数据库
+            import_obunsha_data()
+        }
+        "server" => {  // 新增：启动Web服务器
+            start_web_server()
+        }
         _ => {
-            test_database_structure()
+            println!("使用方法:");
+            println!("  extract      - 提取词典数据");
+            println!("  test-agaku   - 测试あがく词条解析");
+            println!("  init-obunsha - 初始化旺文社国语辞典表");
+            println!("  clean-data   - 清理exported_dict_full.txt");
+            println!("  analyze-data - 分析exported_dict_full.txt结构");
+            println!("  import-obunsha - 导入清理后的数据到旺文社数据库");
+            println!("  server       - 启动Web API服务器");
+            Ok(())
         }
     }
+}
+
+/// 初始化旺文社国語辞典表
+fn init_obunsha_table() -> Result<(), Box<dyn std::error::Error>> {
+    println!("🚀 初始化旺文社国語辞典数据库表...");
+    
+    let db = ObunshaDictDatabase::new("obunsha_dict.db")?;
+    db.initialize()?;
+    
+    let (count, unique) = db.get_stats()?;
+    println!("📊 当前表统计: {} 条词条, {} 个唯一标题", count, unique);
+    
+    println!("✅ 表结构初始化完成!");
+    Ok(())
 }
 
 fn test_agaku_parsing() -> Result<(), Box<dyn std::error::Error>> {
@@ -94,6 +135,92 @@ fn extract_dictionary_data() -> Result<(), Box<dyn std::error::Error>> {
                 i + 1, entry.kana_entry, entry.kanji_form, 
                 entry.pronunciation, entry.entry_type);
     }
+    
+    Ok(())
+}
+
+/// 清理导出的字典数据
+fn clean_exported_data() -> Result<(), Box<dyn std::error::Error>> {
+    println!("🧹 清理exported_dict_full.txt数据...");
+    
+    let mut cleaner = DataCleaner::new();
+    cleaner.clean_exported_dict("exported_dict_full.txt", "exported_dict_cleaned.txt")?;
+    
+    let (valid, redirects, mappings) = cleaner.get_stats();
+    println!("📈 清理结果:");
+    println!("  - 有效词条: {}", valid);
+    println!("  - 重定向记录: {}", redirects);
+    println!("  - 映射关系: {}", mappings);
+    
+    Ok(())
+}
+
+/// 分析导出数据的结构
+fn analyze_exported_data() -> Result<(), Box<dyn std::error::Error>> {
+    println!("🔍 分析exported_dict_full.txt结构...");
+    
+    let mut cleaner = DataCleaner::new();
+    cleaner.analyze_file_structure("exported_dict_full.txt")?;
+    
+    Ok(())
+}
+
+/// 导入清理后的数据到旺文社数据库
+fn import_obunsha_data() -> Result<(), Box<dyn std::error::Error>> {
+    println!("🚀 导入清理后的数据到旺文社数据库...");
+    
+    let cleaned_data_path = "exported_dict_cleaned.txt";
+    let db = ObunshaDictDatabase::new("obunsha_dict.db")?;
+    
+    // 确保表已经初始化
+    db.initialize()?;
+    
+    println!("📖 开始从清理数据导入词条: {}", cleaned_data_path);
+    let imported_count = db.import_from_cleaned_data(cleaned_data_path)?;
+    
+    let (total_count, unique_headwords) = db.get_stats()?;
+    println!("🎉 数据导入完成！");
+    println!("📊 本次导入: {} 条词条", imported_count);
+    println!("📊 数据库总计: {} 条词条, {} 个唯一标题", total_count, unique_headwords);
+    
+    Ok(())
+}
+
+/// 启动Web服务器
+fn start_web_server() -> Result<(), Box<dyn std::error::Error>> {
+    println!("🌐 启动旺文社词典Web服务器...");
+    
+    // 检查数据库文件是否存在
+    let db_path = "obunsha_dict.db";
+    if !std::path::Path::new(db_path).exists() {
+        println!("❌ 错误：数据库文件 {} 不存在", db_path);
+        println!("💡 请先运行 'cargo run import-obunsha' 创建数据库");
+        return Ok(());
+    }
+    
+    // 验证数据库连接
+    match ObunshaDictDatabase::new(db_path) {
+        Ok(db) => {
+            let (count, _) = db.get_stats().unwrap_or((0, 0));
+            if count == 0 {
+                println!("⚠️  警告：数据库为空，请先导入数据");
+                return Ok(());
+            }
+            println!("📚 数据库连接成功，共有 {} 个词条", count);
+        }
+        Err(e) => {
+            println!("❌ 数据库连接失败: {}", e);
+            return Ok(());
+        }
+    }
+    
+    // 使用tokio运行时启动服务器
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async {
+        if let Err(e) = start_server(db_path, 3000).await {
+            println!("❌ 服务器启动失败: {}", e);
+        }
+    });
     
     Ok(())
 }

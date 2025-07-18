@@ -10,3 +10,5 @@ regex = "1.10"
 scraper = "0.18"
 tokio = { version = "1.0", features = ["full"] }
 mdict-parser = "0.1.0"
+axum = "0.7.9"
+serde_json = "1.0.141"

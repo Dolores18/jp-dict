@@ -1,21 +1,24 @@
 use std::env;
 use std::fs;
+use std::io::Write;
 use mdict_parser::parser;
 
 fn main() {
-    println!("MDX词典解析器");
+    println!("MDX词典解析器与导出工具");
     
     let args: Vec<String> = env::args().collect();
     
     if args.len() < 2 {
-        println!("用法: cargo run --bin mdx_parser <mdx文件路径> [--verbose]");
+        println!("用法: cargo run --bin mdx_parser <mdx文件路径> [--export] [--verbose]");
         println!("示例: cargo run --bin mdx_parser data/dictionary.mdx");
+        println!("导出模式: cargo run --bin mdx_parser data/dictionary.mdx --export");
         println!("详细模式: cargo run --bin mdx_parser data/dictionary.mdx --verbose");
         return;
     }
     
     let mdx_file_path = &args[1];
-    let verbose = args.len() > 2 && args[2] == "--verbose";
+    let export_mode = args.contains(&"--export".to_string());
+    let verbose = args.contains(&"--verbose".to_string());
     
     println!("正在解析MDX文件: {}", mdx_file_path);
     
@@ -32,7 +35,49 @@ fn main() {
             let keys: Vec<_> = dict.keys().collect();
             println!("📊 词条总数: {}", keys.len());
             
-            if verbose {
+            if export_mode {
+                // 导出模式：导出全部词条数据为txt格式
+                println!("\n📤 正在导出全部词条数据...");
+                
+                let output_file = "exported_dict_full.txt";
+                match fs::File::create(output_file) {
+                    Ok(mut file) => {
+                        let mut count = 0;
+                        for record in dict.items() {
+                            // 清理关键字和定义中的特殊字符
+                            let key = record.key.replace('\r', "").replace('\n', " ");
+                            let definition = record.definition
+                                .replace('\r', "")
+                                .replace('\n', " ")
+                                .replace("<br>", " ")
+                                .trim()
+                                .to_string();
+                            
+                            // 写入关键字一行，定义一行
+                            if let Err(e) = writeln!(file, "{}", key) {
+                                eprintln!("❌ 写入关键字失败: {}", e);
+                                break;
+                            }
+                            if let Err(e) = writeln!(file, "{}", definition) {
+                                eprintln!("❌ 写入定义失败: {}", e);
+                                break;
+                            }
+                            
+                            count += 1;
+                            
+                            // 每10000条显示一次进度
+                            if count % 10000 == 0 {
+                                println!("已导出 {} 条词条...", count);
+                            }
+                        }
+                        
+                        println!("✅ 成功导出{}条词条到文件: {}", count, output_file);
+                    },
+                    Err(e) => {
+                        eprintln!("❌ 创建输出文件失败: {}", e);
+                    }
+                }
+            } else if verbose {
                 // 详细模式：显示前10个词条
                 println!("\n📝 前10个词条:");
                 for (i, key) in keys.iter().take(10).enumerate() {
@@ -54,6 +99,7 @@ fn main() {
                     println!("   定义: {:?}", record.definition);
                 }
                 println!("\n💡 使用 --verbose 参数查看更多详细信息");
+                println!("💡 使用 --export 参数导出前100条数据为txt格式");
             }
         },
         Err(e) => {
