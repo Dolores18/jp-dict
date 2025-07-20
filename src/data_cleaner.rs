@@ -35,7 +35,10 @@ impl DataCleaner {
         
         let mut output_file = File::create(output_path)?;
         
-        for line_result in reader.lines() {
+        let mut lines = reader.lines();
+        let mut current_title: Option<String> = None;
+        
+        while let Some(line_result) = lines.next() {
             let line = line_result?;
             
             if line.trim().is_empty() {
@@ -52,17 +55,33 @@ impl DataCleaner {
             
             // 检测包含HTML内容的行
             if line.contains("<link rel=\"stylesheet\"") {
+                // 检查是否是重定向词条
+                if self.is_html_redirect(&line) {
+                    self.redirect_entries += 1;
+                    current_title = None; // 重置标题
+                    continue;
+                }
+                
                 // 这是一个完整的HTML词条
-                // 我们需要智能分离标题和HTML内容
-                let (title, html_content) = self.extract_title_and_html(&line);
+                // 我们需要从标题行和HTML内容中提取信息
+                let title = if let Some(title_line) = current_title.take() {
+                    // 从标题行提取假名和汉字
+                    self.extract_title_from_headline(&title_line)
+                } else {
+                    // 如果没有标题行，从HTML中提取
+                    self.extract_title_from_html(&line)
+                };
                 
                 // 输出格式：标题\nHTML内容\n空行
                 writeln!(output_file, "{}", title)?;
-                writeln!(output_file, "{}", html_content)?;
+                writeln!(output_file, "{}", line)?;
                 writeln!(output_file)?; // 空行分隔
                 
                 self.valid_entries += 1;
                 continue;
+            } else {
+                // 这是标题行，保存起来等待HTML行
+                current_title = Some(line);
             }
         }
         
@@ -75,23 +94,57 @@ impl DataCleaner {
         Ok(())
     }
     
-    /// 从包含HTML的行中提取标题和HTML内容
-    fn extract_title_and_html(&self, line: &str) -> (String, String) {
-        // 查找HTML开始位置
-        if let Some(html_start) = line.find("<link rel=\"stylesheet\"") {
-            let html_content = &line[html_start..];
-            
-            // 从HTML中提取假名和汉字标题
-            let title = self.extract_title_from_html(html_content);
-            
-            (title, html_content.to_string())
-        } else {
-            // 这种情况不应该发生，但作为备选方案
-            ("".to_string(), line.to_string())
+    /// 从标题行（headline）中提取标题
+    fn extract_title_from_headline(&self, headline: &str) -> String {
+        // 保留原始headline格式，只做最基本的清理
+        let headline = headline.trim();
+        
+        // 只清理一些明显的装饰符号，保留原始格式
+        let mut result = String::new();
+        for ch in headline.chars() {
+            match ch {
+                // 过滤掉一些明显的装饰符号
+                '◇' | '△' | '▽' | '▲' | '▼' | '○' | '●' | '◯' | '□' | '■' | 
+                '▢' | '▣' | '◆' | '※' | '＊' | '☆' | '★' => {
+                    // 跳过这些标记符号
+                },
+                // 保留所有其他字符，包括【】括号、汉字、假名、符号等
+                _ => result.push(ch),
+            }
         }
+        
+        result.trim().to_string()
     }
     
-    /// 从HTML内容中提取标题
+    /// 为标题清理汉字文本，保留更多符号
+    fn clean_kanji_text_for_title(&self, text: &str) -> String {
+        let mut result = String::new();
+        
+        for ch in text.chars() {
+            match ch {
+                // 保留汉字 (CJK统一汉字)
+                '\u{4e00}'..='\u{9fff}' => result.push(ch),
+                // 保留平假名
+                '\u{3040}'..='\u{309f}' => result.push(ch),
+                // 保留片假名
+                '\u{30a0}'..='\u{30ff}' => result.push(ch),
+                // 保留更多基本符号
+                '・' | '‧' | '·' | '-' | 'ー' | '〔' | '〕' | '（' | '）' => result.push(ch),
+                // 只过滤掉一些明显的装饰符号
+                '◇' | '△' | '▽' | '▲' | '▼' | '○' | '●' | '◯' | '□' | '■' | 
+                '▢' | '▣' | '◆' | '※' | '＊' | '☆' | '★' => {
+                    // 跳过这些标记符号
+                },
+                // 保留其他可能有用的字符（如英文、数字）
+                _ if ch.is_alphanumeric() => result.push(ch),
+                _ => {} // 跳过其他特殊符号
+            }
+        }
+        
+        result.trim().to_string()
+    }
+    
+    /// 从HTML内容中提取标题（备用方法）
     fn extract_title_from_html(&self, html: &str) -> String {
         // 解析HTML
         let document = Html::parse_fragment(html);
@@ -210,9 +263,27 @@ impl DataCleaner {
     
     /// 检查是否是汉字重定向的开始
     fn is_kanji_redirect_start(&self, line: &str) -> bool {
-        let line = line.trim();
-        // 检查是否是单独的汉字行（1-3个字符，主要由汉字组成）
-        line.len() >= 1 && line.len() <= 3 && self.is_likely_kanji_only(line)
+        line.contains("漢字重定向") || line.contains("kanji redirect")
+    }
+
+    /// 检查HTML内容是否是重定向词条
+    fn is_html_redirect(&self, html: &str) -> bool {
+        // 检查是否包含重定向链接模式
+        let redirect_patterns = [
+            "→<a class=\"link\"",
+            "→<a href=\"entry://",
+            "→<a ",
+            "→<",
+            "→",
+        ];
+        
+        for pattern in &redirect_patterns {
+            if html.contains(pattern) {
+                return true;
+            }
+        }
+        
+        false
     }
     
     /// 检测是否到达分界点（汉字重定向区域开始）

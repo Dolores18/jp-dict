@@ -372,21 +372,31 @@ impl ObunshaDictDatabase {
         let mut part_of_speech: Option<String> = None;
         let mut conjugation: Option<String> = None;
 
-        // 提取并清理假名读音
-        if let Some(kana_element) = document.select(&kana_selector).next() {
-            let kana_text = kana_element.text().collect::<String>();
-            let cleaned_kana = self.clean_kana_text(&kana_text);
-            if !cleaned_kana.is_empty() {
-                kana_reading = Some(cleaned_kana);
+        // 优先从headline（title）解析假名和汉字
+        if let Some((kana, kanji)) = self.parse_headline(title) {
+            kana_reading = Some(kana);
+            kanji_writing = Some(kanji);
+        } else {
+        }
+
+        // 如果从headline解析失败，再从HTML中选择器提取
+        if kana_reading.is_none() {
+            if let Some(kana_element) = document.select(&kana_selector).next() {
+                let kana_text = kana_element.text().collect::<String>();
+                let cleaned_kana = self.clean_kana_text(&kana_text);
+                if !cleaned_kana.is_empty() {
+                    kana_reading = Some(cleaned_kana);
+                }
             }
         }
 
-        // 提取并清理汉字表记
-        if let Some(kanji_element) = document.select(&kanji_selector).next() {
-            let kanji_text = kanji_element.text().collect::<String>();
-            let cleaned_kanji = self.clean_kanji_text(&kanji_text);
-            if !cleaned_kanji.is_empty() {
-                kanji_writing = Some(cleaned_kanji);
+        if kanji_writing.is_none() {
+            if let Some(kanji_element) = document.select(&kanji_selector).next() {
+                let kanji_text = kanji_element.text().collect::<String>();
+                let cleaned_kanji = self.clean_kanji_text(&kanji_text);
+                if !cleaned_kanji.is_empty() {
+                    kanji_writing = Some(cleaned_kanji);
+                }
             }
         }
 
@@ -433,6 +443,50 @@ impl ObunshaDictDatabase {
             definition_text,
             raw_mdx_content: format!("{}\n{}", title, html),
         })
+    }
+
+    /// 从headline解析假名和汉字
+    fn parse_headline(&self, headline: &str) -> Option<(String, String)> {
+        let headline = headline.trim();
+        
+        // 检查是否包含【】括号格式：假名【汉字】
+        if let Some(start) = headline.find('【') {
+            if let Some(end) = headline.find('】') {
+                if start < end {
+                    // 使用chars()迭代器来正确处理中文字符
+                    let chars: Vec<char> = headline.chars().collect();
+                    
+                    // 将字节索引转换为字符索引
+                    let start_char = headline[..start].chars().count();
+                    let end_char = headline[..end].chars().count();
+                    
+                    if start_char < end_char && start_char < chars.len() && end_char < chars.len() {
+                        let kana_part: String = chars[..start_char].iter().collect();
+                        let kanji_part: String = chars[start_char + 1..end_char].iter().collect();
+                        
+                        // 假名部分不能为空，汉字部分可以为空（如：ば【】）
+                        if !kana_part.is_empty() {
+                            return Some((kana_part, kanji_part));
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 如果没有括号，检查是否只有假名
+        if !headline.is_empty() {
+            // 检查是否包含汉字
+            let has_kanji = headline.chars().any(|c| {
+                c >= '\u{4e00}' && c <= '\u{9fff}' // CJK统一汉字
+            });
+            
+            if !has_kanji {
+                // 只有假名的情况
+                return Some((headline.to_string(), String::new()));
+            }
+        }
+        
+        None
     }
 
     /// 清理假名文本，去除特殊符号和HTML标签
