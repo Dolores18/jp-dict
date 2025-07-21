@@ -11,10 +11,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 检出代码
+      - name: 🛎️ 检出代码
         uses: actions/checkout@v4
 
-      - name: 缓存 Rust 依赖
+      - name: 💾 缓存 Rust 依赖
         uses: actions/cache@v4
         with:
           path: |
@@ -25,22 +25,31 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: 安装 Rust
+      - name: 🦀 安装 Rust 工具链
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           override: true
 
-      - name: 安装依赖
-        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
+      - name: 🔧 安装系统依赖（libsqlite3-dev）
+        run: |
+          echo "📦 开始安装 libsqlite3-dev..."
+          sudo apt-get update
+          sudo apt-get install -y libsqlite3-dev
+          echo "✅ 系统依赖安装完成"
 
-      - name: 编译 dict server
-        run: cargo build --release --bin dict
+      - name: 🔨 编译 dict server（release 模式）
+        run: |
+          echo "🚧 开始构建..."
+          cargo build --release --bin dict server
+          echo "✅ 构建完成"
 
-      - name: 显示可执行文件
-        run: ls -lh target/release/dict
+      - name: 📁 显示构建后的可执行文件信息
+        run: |
+          ls -lh target/release/dict
+          file target/release/dict
 
-      - name: 上传二进制文件
+      - name: 📤 上传构建产物（artifact）
         uses: actions/upload-artifact@v4
         with:
           name: dict-server
