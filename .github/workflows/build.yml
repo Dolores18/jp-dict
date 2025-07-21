@@ -11,78 +11,77 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: 🧾 Step 0: Show Environment Info
-        run: |
-          echo "🏁 启动构建流程"
-          echo "操作系统: $RUNNER_OS"
-          echo "当前目录: $(pwd)"
-          echo "GitHub Workspace: $GITHUB_WORKSPACE"
+    - name: "🧾 Step 0: Show Environment Info"
+      run: |
+        echo "🏁 启动构建流程"
+        echo "操作系统: $RUNNER_OS"
+        echo "当前目录: $(pwd)"
+        echo "GitHub Workspace: $GITHUB_WORKSPACE"
 
-      - name: ✅ Step 1: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+    - name: "✅ Step 1: Checkout code"
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
-      - name: 🦀 Step 2: Setup Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
-          target: x86_64-unknown-linux-gnu
+    - name: "🦀 Step 2: Setup Rust"
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+        target: x86_64-unknown-linux-gnu
 
-      - name: 💾 Step 3: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          cache-on-failure: true
+    - name: "💾 Step 3: Cache Rust dependencies"
+      uses: Swatinem/rust-cache@v2
+      with:
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        cache-on-failure: true
 
-      - name: 🧰 Step 4: Install system dependencies
-        run: |
-          echo "更新 apt 包信息并安装依赖..."
-          sudo apt-get update
-          sudo apt-get install -y libsqlite3-dev pkg-config
-          echo "依赖安装完成 ✅"
+    - name: "🧰 Step 4: Install system dependencies"
+      run: |
+        echo "更新 apt 包信息并安装依赖..."
+        sudo apt-get update
+        sudo apt-get install -y libsqlite3-dev pkg-config
+        echo "依赖安装完成 ✅"
 
-      - name: 🛠️ Step 5: Build release binary
-        run: |
-          echo "开始构建 dict server..."
-          cargo build --release --target x86_64-unknown-linux-gnu --bin dict
-          echo "构建完成 ✅"
+    - name: "🛠️ Step 5: Build release binary"
+      run: |
+        echo "开始构建 dict server..."
+        cargo build --release --target x86_64-unknown-linux-gnu --bin dict
+        echo "构建完成 ✅"
 
-      - name: 🏷️ Step 6: Generate version number
-        id: version
-        run: |
-          echo "生成版本号..."
-          GIT_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-          if [[ -n "$GIT_TAG" && "$GIT_TAG" =~ ^v[0-9].* ]]; then
-            VERSION="${GIT_TAG#v}"
-          else
-            COMMIT_HASH=$(git rev-parse --short HEAD)
-            DATE=$(date +%Y%m%d)
-            VERSION="0.1.0~${DATE}.${COMMIT_HASH}"
-          fi
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "生成的版本号：$VERSION"
+    - name: "🏷️ Step 6: Generate version number"
+      id: version
+      run: |
+        echo "生成版本号..."
+        GIT_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+        if [[ -n "$GIT_TAG" && "$GIT_TAG" =~ ^v[0-9].* ]]; then
+          VERSION="${GIT_TAG#v}"
+        else
+          COMMIT_HASH=$(git rev-parse --short HEAD)
+          DATE=$(date +%Y%m%d)
+          VERSION="0.1.0~${DATE}.${COMMIT_HASH}"
+        fi
+        echo "VERSION=$VERSION" >> $GITHUB_ENV
+        echo "生成的版本号：$VERSION"
 
-      - name: 📦 Step 7: Rename binary
-        run: |
-          echo "检查构建产物..."
-          ls -lh target/x86_64-unknown-linux-gnu/release/
-          cp target/x86_64-unknown-linux-gnu/release/dict dict-server_${{ env.VERSION }}
-          echo "已重命名为 dict-server_${{ env.VERSION }}"
+    - name: "📦 Step 7: Rename binary"
+      run: |
+        echo "检查构建产物..."
+        ls -lh target/x86_64-unknown-linux-gnu/release/
+        cp target/x86_64-unknown-linux-gnu/release/dict dict-server_${{ env.VERSION }}
+        echo "已重命名为 dict-server_${{ env.VERSION }}"
 
-      - name: 📤 Step 8: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: dict-server
-          path: dict-server_*
+    - name: "📤 Step 8: Upload artifact"
+      uses: actions/upload-artifact@v4
+      with:
+        name: dict-server
+        path: dict-server_*
 
-      - name: 🚀 Step 9: Create GitHub Release (if tagged)
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v1
-        with:
-          files: dict-server_*
-          draft: false
-          prerelease: false
+    - name: "🚀 Step 9: Create GitHub Release (if tagged)"
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: dict-server_*
+        draft: false
+        prerelease: false
