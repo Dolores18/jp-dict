@@ -1,4 +1,4 @@
-name: Build dict server
+name: Build Debian Package
 
 on:
   push:
@@ -11,40 +11,44 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: 📦 检出代码（Checkout）
+        uses: actions/checkout@v3
         with:
           fetch-depth: 0
 
-      - name: Setup Rust
+      - name: 🦀 安装 Rust（Setup Rust）
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           override: true
           target: x86_64-unknown-linux-gnu
 
-      # 缓存 Rust 依赖
-      - name: Cache Rust dependencies
+      - name: 💾 缓存 Rust 依赖（Cache）
         uses: Swatinem/rust-cache@v2
         with:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           cache-on-failure: true
 
-      - name: Install dependencies
+      - name: 🔧 安装构建依赖项（apt）
         run: |
+          echo "🧰 正在安装 libsqlite3-dev 和 pkg-config..."
           sudo apt-get update
           sudo apt-get install -y libsqlite3-dev pkg-config
+          echo "✅ 系统依赖安装完成"
 
-      - name: Build release binary
+      - name: 🔨 编译项目（cargo build）
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --release --target x86_64-unknown-linux-gnu --bin dict
+          args: --release --target x86_64-unknown-linux-gnu
 
-      - name: Generate version number
+      - name: 🏷️ 生成版本号（from git tag or commit）
         id: version
         run: |
+          set -e
+          echo "🔍 正在生成版本号..."
           GIT_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
           if [[ -n "$GIT_TAG" && "$GIT_TAG" =~ ^v[0-9].* ]]; then
             VERSION="${GIT_TAG#v}"
@@ -54,23 +58,46 @@ jobs:
             VERSION="0.1.0~${DATE}.${COMMIT_HASH}"
           fi
           echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "生成的版本号：$VERSION"
+          echo "✅ 生成版本号: $VERSION"
 
-      - name: Rename binary with version
+      - name: 📂 创建 Debian 包目录结构
         run: |
-          cp target/x86_64-unknown-linux-gnu/release/dict dict-server_${{ env.VERSION }}
+          echo "📂 创建目录..."
+          mkdir -p debian/DEBIAN
+          mkdir -p debian/usr/bin
+          mkdir -p debian/usr/share/doc/api-manager
+          
+          echo "📁 拷贝构建产物..."
+          cp target/x86_64-unknown-linux-gnu/release/api-manager debian/usr/bin/
+          chmod +x debian/usr/bin/api-manager
+          
+          echo "📄 写入控制文件..."
+          cat > debian/DEBIAN/control << EOF
+          Package: api-manager
+          Version: ${{ env.VERSION }}
+          Section: utils
+          Priority: optional
+          Architecture: amd64
+          Maintainer: API Manager Team <info@example.com>
+          Description: API Manager for DeepSeek and other AI models
+           A management tool for AI API providers with load balancing capabilities.
+          EOF
 
-      - name: Upload artifact
+      - name: 🧱 构建 Debian 包
+        run: |
+          echo "📦 开始打包..."
+          dpkg-deb --build debian
+          mv debian.deb api-manager_${{ env.VERSION }}.deb
+          echo "✅ 打包完成"
+
+      - name: ⬆️ 上传构建产物（artifact）
         uses: actions/upload-artifact@v4
         with:
-          name: dict-server
-          path: dict-server_*
+          name: api-manager-debian
+          path: api-manager_*.deb
 
-      # 仅在发布标签时创建 Release
-      - name: Create Release
+      - name: 🚀 创建发布（仅发布标签触发）
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v1
         with:
-          files: dict-server_*
-          draft: false
-          prerelease: false
+          files: api-manager_*.deb
