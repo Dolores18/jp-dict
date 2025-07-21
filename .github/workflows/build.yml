@@ -1,4 +1,4 @@
-name: Build Debian Package
+name: Build dict server
 
 on:
   push:
@@ -13,42 +13,48 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 📦 检出代码（Checkout）
-        uses: actions/checkout@v3
+      - name: 🧾 Step 0: Show Environment Info
+        run: |
+          echo "🏁 启动构建流程"
+          echo "操作系统: $RUNNER_OS"
+          echo "当前目录: $(pwd)"
+          echo "GitHub Workspace: $GITHUB_WORKSPACE"
+
+      - name: ✅ Step 1: Checkout code
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: 🦀 安装 Rust（Setup Rust）
+      - name: 🦀 Step 2: Setup Rust
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           override: true
           target: x86_64-unknown-linux-gnu
 
-      - name: 💾 缓存 Rust 依赖（Cache）
+      - name: 💾 Step 3: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           cache-on-failure: true
 
-      - name: 🔧 安装构建依赖项（apt）
+      - name: 🧰 Step 4: Install system dependencies
         run: |
-          echo "🧰 正在安装 libsqlite3-dev 和 pkg-config..."
+          echo "更新 apt 包信息并安装依赖..."
           sudo apt-get update
           sudo apt-get install -y libsqlite3-dev pkg-config
-          echo "✅ 系统依赖安装完成"
+          echo "依赖安装完成 ✅"
 
-      - name: 🔨 编译项目（cargo build）
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --release --target x86_64-unknown-linux-gnu
+      - name: 🛠️ Step 5: Build release binary
+        run: |
+          echo "开始构建 dict server..."
+          cargo build --release --target x86_64-unknown-linux-gnu --bin dict
+          echo "构建完成 ✅"
 
-      - name: 🏷️ 生成版本号（from git tag or commit）
+      - name: 🏷️ Step 6: Generate version number
         id: version
         run: |
-          set -e
-          echo "🔍 正在生成版本号..."
+          echo "生成版本号..."
           GIT_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
           if [[ -n "$GIT_TAG" && "$GIT_TAG" =~ ^v[0-9].* ]]; then
             VERSION="${GIT_TAG#v}"
@@ -58,46 +64,25 @@ jobs:
             VERSION="0.1.0~${DATE}.${COMMIT_HASH}"
           fi
           echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "✅ 生成版本号: $VERSION"
+          echo "生成的版本号：$VERSION"
 
-      - name: 📂 创建 Debian 包目录结构
+      - name: 📦 Step 7: Rename binary
         run: |
-          echo "📂 创建目录..."
-          mkdir -p debian/DEBIAN
-          mkdir -p debian/usr/bin
-          mkdir -p debian/usr/share/doc/api-manager
-          
-          echo "📁 拷贝构建产物..."
-          cp target/x86_64-unknown-linux-gnu/release/api-manager debian/usr/bin/
-          chmod +x debian/usr/bin/api-manager
-          
-          echo "📄 写入控制文件..."
-          cat > debian/DEBIAN/control << EOF
-          Package: api-manager
-          Version: ${{ env.VERSION }}
-          Section: utils
-          Priority: optional
-          Architecture: amd64
-          Maintainer: API Manager Team <info@example.com>
-          Description: API Manager for DeepSeek and other AI models
-           A management tool for AI API providers with load balancing capabilities.
-          EOF
+          echo "检查构建产物..."
+          ls -lh target/x86_64-unknown-linux-gnu/release/
+          cp target/x86_64-unknown-linux-gnu/release/dict dict-server_${{ env.VERSION }}
+          echo "已重命名为 dict-server_${{ env.VERSION }}"
 
-      - name: 🧱 构建 Debian 包
-        run: |
-          echo "📦 开始打包..."
-          dpkg-deb --build debian
-          mv debian.deb api-manager_${{ env.VERSION }}.deb
-          echo "✅ 打包完成"
-
-      - name: ⬆️ 上传构建产物（artifact）
+      - name: 📤 Step 8: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: api-manager-debian
-          path: api-manager_*.deb
+          name: dict-server
+          path: dict-server_*
 
-      - name: 🚀 创建发布（仅发布标签触发）
+      - name: 🚀 Step 9: Create GitHub Release (if tagged)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v1
         with:
-          files: api-manager_*.deb
+          files: dict-server_*
+          draft: false
+          prerelease: false
