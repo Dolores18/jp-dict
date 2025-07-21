@@ -2,75 +2,75 @@ name: Build dict server
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ main ]
+    tags: [ 'v*' ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
     steps:
-      - name: 🛎️ 检出代码（Checkout Repository）
+      - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: 📝 显示提交信息
-        run: |
-          echo "当前提交: $(git rev-parse HEAD)"
-          echo "最近提交日志:"
-          git log -n 5 --oneline
-          echo "修改的文件:"
-          git diff --name-only HEAD~1 HEAD || true
-
-      - name: 💾 缓存 Rust 依赖
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-
-      - name: 🦀 安装 Rust 工具链
+      - name: Setup Rust
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           override: true
+          target: x86_64-unknown-linux-gnu
 
-      - name: 🔧 安装构建依赖项（libsqlite3-dev）
+      # 缓存 Rust 依赖
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          cache-on-failure: true
+
+      - name: Install dependencies
         run: |
-          echo "📦 安装系统依赖..."
           sudo apt-get update
-          sudo apt-get install -y libsqlite3-dev
-          echo "✅ libsqlite3-dev 安装完成"
+          sudo apt-get install -y libsqlite3-dev pkg-config
 
-      - name: 🔨 构建 dict server（release 模式）
+      - name: Build release binary
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release --target x86_64-unknown-linux-gnu --bin dict
+
+      - name: Generate version number
+        id: version
         run: |
-          echo "🚧 开始构建 dict server..."
-          cargo build --release --bin dict
-          echo "✅ 构建完成！"
+          GIT_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [[ -n "$GIT_TAG" && "$GIT_TAG" =~ ^v[0-9].* ]]; then
+            VERSION="${GIT_TAG#v}"
+          else
+            COMMIT_HASH=$(git rev-parse --short HEAD)
+            DATE=$(date +%Y%m%d)
+            VERSION="0.1.0~${DATE}.${COMMIT_HASH}"
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "生成的版本号：$VERSION"
 
-      - name: 📁 显示可执行文件信息
+      - name: Rename binary with version
         run: |
-          echo "🎯 可执行文件信息如下："
-          ls -lh target/release/dict
-          file target/release/dict
+          cp target/x86_64-unknown-linux-gnu/release/dict dict-server_${{ env.VERSION }}
 
-      - name: 🚀 运行 API 服务测试（可选）
-        run: |
-          echo "🧪 启动 server 模拟运行测试（例如检查 --help）"
-          ./target/release/dict --help || true
-
-      - name: 📤 上传构建产物
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: dict-server
-          path: target/release/dict
-          retention-days: 7
+          path: dict-server_*
+
+      # 仅在发布标签时创建 Release
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dict-server_*
+          draft: false
+          prerelease: false
